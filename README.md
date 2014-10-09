@@ -1,12 +1,12 @@
-# CanCanActiveForce
+# CanCanActiveForceAdapter
 
-Allows CanCan to work with ActiveForce SObjects
+Allows [CanCan](https://github.com/ryanb/cancan)/[CanCanCan](https://github.com/CanCanCommunity/cancancan) to work with [ActiveForce](https://github.com/ionia-corporation/active_force) SObjects
 
 ## Installation
 
 Add this line to your application's Gemfile:
 
-    gem 'cancan_active_force'
+    gem 'cancan_active_force_adapter'
 
 And then execute:
 
@@ -14,11 +14,11 @@ And then execute:
 
 Or install it yourself as:
 
-    $ gem install cancan_active_force
+    $ gem install cancan_active_force_adapter
 
 ## Usage
 
-TODO: Write usage instructions here
+Declare permissions and use CanCan methods as you would for ActiveRecord models
 
 ## Contributing
 
