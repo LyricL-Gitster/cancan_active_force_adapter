@@ -4,39 +4,8 @@ module CanCanActiveForceAdapter
       model_class <= ActiveForce::SObject
     end
 
-    def self.override_condition_matching?(subject, name, value)
-      name.kind_of?(MetaWhere::Column) if defined? MetaWhere
-    end
-
-    def self.matches_condition?(subject, name, value)
-      subject_value = subject.send(name.column)
-      if name.method.to_s.ends_with? "_any"
-        value.any? { |v| meta_where_match? subject_value, name.method.to_s.sub("_any", ""), v }
-      elsif name.method.to_s.ends_with? "_all"
-        value.all? { |v| meta_where_match? subject_value, name.method.to_s.sub("_all", ""), v }
-      else
-        meta_where_match? subject_value, name.method, value
-      end
-    end
-
-    def self.meta_where_match?(subject_value, method, value)
-      case method.to_sym
-      when :eq      then subject_value == value
-      when :not_eq  then subject_value != value
-      when :in      then value.include?(subject_value)
-      when :not_in  then !value.include?(subject_value)
-      when :lt      then subject_value < value
-      when :lteq    then subject_value <= value
-      when :gt      then subject_value > value
-      when :gteq    then subject_value >= value
-      when :matches then subject_value =~ Regexp.new("^" + Regexp.escape(value).gsub("%", ".*") + "$", true)
-      when :does_not_match then !meta_where_match?(subject_value, :matches, value)
-      else raise NotImplemented, "The #{method} MetaWhere condition is not supported."
-      end
-    end
-
     # Returns conditions intended to be used inside a database query. Normally you will not call this
-    # method directly, but instead go through ModelAdditions#accessible_by.
+    # method directly, but instead go through CanCan::ModelAdditions#accessible_by.
     #
     # If there is only one "can" definition, a hash of conditions will be returned matching the one defined.
     #
@@ -61,78 +30,44 @@ module CanCanActiveForceAdapter
       end
     end
 
-    def tableized_conditions(conditions, model_class = @model_class)
+    def tableized_conditions(conditions, **opts)
       return conditions unless conditions.kind_of? Hash
-      conditions.inject({}) do |result_hash, (name, value)|
+      opts.reverse_merge! model_class: @model_class
+      result_hash = conditions.inject({}) do |temp_hash, (name, value)|
         if value.kind_of? Hash
           value = value.dup
-          association_class = model_class.reflect_on_association(name).klass.name.constantize
-          nested = value.inject({}) do |nested,(k,v)|
-            if v.kind_of? Hash
-              value.delete(k)
-              nested[k] = v
-            else
-              result_hash[model_class.reflect_on_association(name).table_name.to_sym] = value
-            end
-            nested
-          end
-          result_hash.merge!(tableized_conditions(nested,association_class))
-        else
-          result_hash[name] = value
-        end
-        result_hash
-      end
-    end
+          association_class    = opts[:model_class].associations[name].relation_model
+          association_sf_field = opts[:model_class].associations[name].foreign_key
+          association_field    = opts[:model_class].mapping.mappings.select{|key, value| value == association_sf_field }.keys[0]
 
-    # Returns the associations used in conditions for the :joins option of a search.
-    # See ModelAdditions#accessible_by
-    def joins
-      joins_hash = {}
-      @rules.each do |rule|
-        merge_joins(joins_hash, rule.associations_hash)
+          # Merge Id's of records that can be accessed for the given association.
+          # (e.g. {carlton_id: [1,2,3]})
+          temp_hash[association_field] = tableized_conditions(value, model_class: association_class, query_ids_as: association_field)[association_field]
+        else
+          temp_hash[name] = value
+        end
+
+        temp_hash
       end
-      clean_joins(joins_hash) unless joins_hash.empty?
+
+      if !!opts[:query_ids_as]
+        result_hash[opts[:query_ids_as]] = opts[:model_class].select(:id).where(result_hash).map &:id
+      end
+
+      result_hash
     end
 
     def database_records
-      if override_scope
-        @model_class.where(nil).merge(override_scope)
-      elsif @model_class.respond_to?(:where) && @model_class.respond_to?(:joins)
-        if mergeable_conditions?
-          build_relation(conditions)
-        else
-          build_relation(*(@rules.map(&:conditions)))
-        end
+      c = conditions
+      if c.blank?
+        @model_class.where true_sql
       else
-        if conditions.blank?
-          @model_class.where true_sql
-        else
-          @model_class.where conditions
-        end
+        @model_class.where(c)
+        #@model_class.includes(included_conditions).where conditions
       end
     end
 
     private
-
-    def build_relation(*where_conditions)
-      @model_class.where(*where_conditions).includes(joins)
-    end
-
-    def mergeable_conditions?
-      @rules.find {|rule| rule.unmergeable? }.blank?
-    end
-
-    def override_scope
-      conditions = @rules.map(&:conditions).compact
-      if defined?(ActiveForce::ActiveQuery) && conditions.any? { |c| c.kind_of?(ActiveForce::ActiveQuery) }
-        if conditions.size == 1
-          conditions.first
-        else
-          rule = @rules.detect { |rule| rule.conditions.kind_of?(ActiveForce::ActiveQuery) }
-          raise Error, "Unable to merge an Active Record scope with other conditions. Instead use a hash or SQL for #{rule.actions.first} #{rule.subjects.first} ability."
-        end
-      end
-    end
 
     def merge_conditions(sql, conditions_hash, behavior)
       if conditions_hash.blank?
@@ -161,17 +96,6 @@ module CanCanActiveForceAdapter
     def sanitize_sql(conditions)
       sql = Array(ActiveForce::ActiveQuery.new(@model_class).send(:build_condition, conditions))
       sql.join 'AND'
-    end
-
-    # Takes two hashes and does a deep merge.
-    def merge_joins(base, add)
-      add.each do |name, nested|
-        if base[name].is_a?(Hash)
-          merge_joins(base[name], nested) unless nested.empty?
-        else
-          base[name] = nested
-        end
-      end
     end
 
     # Removes empty hashes and moves everything into arrays.
