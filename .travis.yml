@@ -1,0 +1,15 @@
+language: ruby
+rvm:
+  - 1.9.3
+  - 2.0.0
+  - 2.1.1
+  - rbx-2
+matrix:
+  allow_failures:
+    - rvm:
+      - rbx-2
+  fast_finish: true
+notifications:
+  webhooks:
+    urls:
+      - https://webhooks.gitter.im/olvap/cancan_active_force_adapter
